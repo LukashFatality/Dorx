@@ -4,6 +4,8 @@
 
 Developed by **Lukash** for security researchers and penetration testers.
 
+Contact Telegram https://t.me/lukash_fatality
+
 ---
 
 ## 🚀 Features
