@@ -32,7 +32,7 @@ Developed by **Lukash** for security researchers and penetration testers.
 ### Method 1: Clone Repository (Recommended)
 
 ```bash
-git clone https://github.com/username/dorkx
+git clone https://github.com/lukashfatality/dorkx
 cd dorkx
 pip install requests beautifulsoup4 schedule
 python dork --help
