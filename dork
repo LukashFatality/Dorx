@@ -1,0 +1,611 @@
+#!/usr/bin/env python3
+# DORKX Ultimate Edition - FULL VERSION with All Features + Proxy
+
+import requests
+import json
+import os
+import sys
+import time
+import random
+import re
+import threading
+import queue
+import argparse
+import hashlib
+from datetime import datetime
+from urllib.parse import quote
+from bs4 import BeautifulSoup
+
+VERSION = "7.0"
+RESULTS_DIR = "results"
+DOWNLOADS_DIR = "downloads"
+PROXY_FILE = "proxy.txt"
+
+for d in [RESULTS_DIR, DOWNLOADS_DIR]:
+    os.makedirs(d, exist_ok=True)
+
+
+class DorkX:
+    def __init__(self):
+        self.session = requests.Session()
+        self.results = []
+        self.downloaded = []
+        self.lock = threading.Lock()
+        self.engine = "google"
+        self.proxies = []
+        self.current_proxy = None
+        self.load_config()
+        self.load_proxies()
+
+    def load_config(self):
+        try:
+            with open('dorks.json', 'r') as f:
+                self.cfg = json.load(f)
+            print(f"[+] Loaded config")
+        except:
+            print("[!] dorks.json not found, using defaults")
+            self.cfg = {
+                "admin_paths": ["/admin", "/login"],
+                "dork_queries": ["inurl:admin"],
+                "data_pribadi": [],
+                "database_files": [],
+                "sensitive_files": [],
+                "sqli": []
+            }
+
+    def load_proxies(self):
+        if not os.path.exists(PROXY_FILE):
+            return
+        with open(PROXY_FILE, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    self.proxies.append(line)
+        if self.proxies:
+            print(f"[+] Loaded {len(self.proxies)} proxies")
+
+    def set_proxy(self, proxy):
+        self.current_proxy = proxy
+        self.session.proxies = {'http': proxy, 'https': proxy}
+        return proxy
+
+    def get_next_proxy(self):
+        if not self.proxies:
+            return None
+        proxy = random.choice(self.proxies)
+        self.set_proxy(proxy)
+        return proxy
+
+    def test_proxy(self, proxy):
+        try:
+            r = requests.get('https://www.bing.com', proxies={'http': proxy, 'https': proxy}, timeout=10)
+            return r.status_code == 200
+        except:
+            return False
+
+    def check_all_proxies(self):
+        print("\n[+] Checking proxies...")
+        working = []
+        for proxy in self.proxies:
+            print(f"[*] Testing: {proxy}")
+            if self.test_proxy(proxy):
+                print(f"    [LIVE] {proxy}")
+                working.append(proxy)
+            else:
+                print(f"    [DEAD] {proxy}")
+        return working
+
+    def get_ua(self):
+        agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
+        ]
+        return random.choice(agents)
+
+    def search_google(self, query, max_pages=1):
+        urls = []
+        headers = {'User-Agent': self.get_ua()}
+        for page in range(max_pages):
+            url = f"https://www.google.com/search?q={quote(query)}&start={page*10}"
+            try:
+                r = self.session.get(url, headers=headers, timeout=15)
+                if 'unusual traffic' in r.text.lower():
+                    print("[!] Google blocked, switching to Bing")
+                    self.engine = "bing"
+                    return self.search_bing(query, max_pages)
+                soup = BeautifulSoup(r.text, 'html.parser')
+                for link in soup.find_all('a'):
+                    href = link.get('href')
+                    if href and '/url?q=' in href:
+                        clean = href.split('/url?q=')[1].split('&')[0]
+                        if clean.startswith('http') and 'google.com' not in clean:
+                            urls.append(clean)
+                time.sleep(2)
+            except:
+                continue
+        return list(set(urls))
+
+    def search_bing(self, query, max_pages=1):
+        urls = []
+        headers = {'User-Agent': self.get_ua()}
+        for page in range(max_pages):
+            url = f"https://www.bing.com/search?q={quote(query)}&first={page*10}"
+            try:
+                r = self.session.get(url, headers=headers, timeout=15)
+                soup = BeautifulSoup(r.text, 'html.parser')
+                for link in soup.find_all('a'):
+                    href = link.get('href')
+                    if href and href.startswith('http') and 'bing.com' not in href:
+                        urls.append(href)
+                time.sleep(1)
+            except:
+                continue
+        return list(set(urls))
+
+    def search_duckduckgo(self, query, max_pages=1):
+        urls = []
+        headers = {'User-Agent': self.get_ua()}
+        for page in range(max_pages):
+            url = f"https://html.duckduckgo.com/html/?q={quote(query)}"
+            try:
+                r = self.session.get(url, headers=headers, timeout=15)
+                soup = BeautifulSoup(r.text, 'html.parser')
+                for link in soup.find_all('a', class_='result__a'):
+                    href = link.get('href')
+                    if href:
+                        urls.append(href)
+                time.sleep(1)
+            except:
+                continue
+        return list(set(urls))
+
+    def search(self, query, max_pages=1):
+        if self.engine == "google":
+            return self.search_google(query, max_pages)
+        elif self.engine == "bing":
+            return self.search_bing(query, max_pages)
+        else:
+            return self.search_duckduckgo(query, max_pages)
+
+    def check_status(self, url, timeout=5):
+        try:
+            r = self.session.get(url, timeout=timeout, allow_redirects=True)
+            return r.status_code, r.url
+        except:
+            return None, url
+
+    def download_file(self, url):
+        try:
+            r = self.session.get(url, timeout=15)
+            if r.status_code == 200 and len(r.content) > 0:
+                filename = url.split('/')[-1].split('?')[0] or f"dl_{hashlib.md5(url.encode()).hexdigest()[:8]}.dat"
+                path = os.path.join(DOWNLOADS_DIR, filename)
+                with open(path, 'wb') as f:
+                    f.write(r.content)
+                return path, len(r.content)
+        except:
+            pass
+        return None, 0
+
+    # ==================== SINGLE ADMIN ====================
+    def scan_admin_single(self, domain, threads=5, wordlist=None):
+        paths = wordlist if wordlist else self.cfg.get('admin_paths', ['/admin', '/login'])
+        print(f"\n[+] Single Target: {domain}")
+        print(f"[+] Checking {len(paths)} paths\n")
+
+        result_urls = []
+        for path in paths:
+            for proto in ['https', 'http']:
+                url = f"{proto}://{domain}{path}"
+                status, final = self.check_status(url, timeout=3)
+                if status in [200, 401, 403]:
+                    print(f"[FOUND] {final} (HTTP {status})")
+                    result_urls.append({'url': final, 'status': status, 'type': 'admin'})
+                    break
+        self.results.extend(result_urls)
+        return result_urls
+
+    # ==================== MASS ADMIN ====================
+    def scan_admin_mass(self, tld, threads=10, status_filter=None):
+        print(f"\n[+] Mass Target: .{tld} (Engine: {self.engine.upper()})")
+        domains = set()
+        
+        for q in self.cfg.get('dork_queries', ['inurl:admin']):
+            query = f"site:.{tld} {q}"
+            urls = self.search(query, max_pages=1)
+            for url in urls:
+                dom = re.search(r'https?://([^/]+)', url)
+                if dom:
+                    domains.add(dom.group(1))
+            time.sleep(2)
+
+        print(f"[+] Found {len(domains)} domains")
+        result_urls = []
+
+        for domain in list(domains)[:50]:
+            for path in self.cfg.get('admin_paths', [])[:5]:
+                for proto in ['https', 'http']:
+                    url = f"{proto}://{domain}{path}"
+                    status, final = self.check_status(url, timeout=3)
+                    if status in [200, 401, 403]:
+                        if status_filter is None or status == status_filter:
+                            print(f"[FOUND] {final} (HTTP {status})")
+                            result_urls.append({'url': final, 'status': status, 'type': 'admin'})
+                        break
+        self.results.extend(result_urls)
+        return result_urls
+
+    # ==================== DATA PRIBADI ====================
+    def scan_data_pribadi(self, tld, download_all=False):
+        print(f"\n[+] Data Pribadi Scan: .{tld} (Engine: {self.engine.upper()})")
+        if self.current_proxy:
+            print(f"[+] Proxy: {self.current_proxy}")
+        
+        results = []
+        queries = self.cfg.get('data_pribadi', [])
+        
+        for i, dork in enumerate(queries, 1):
+            query = f"site:.{tld} {dork}"
+            print(f"[{i}/{len(queries)}] {dork[:50]}...")
+            urls = self.search(query, max_pages=1)
+            for url in urls:
+                status, final = self.check_status(url)
+                if status == 200:
+                    print(f"[DATA] {final}")
+                    results.append({'url': final, 'type': 'data_pribadi', 'status': status})
+                    if download_all:
+                        path, size = self.download_file(final)
+                        if path:
+                            print(f"  [DOWNLOADED] {path} ({size} bytes)")
+            time.sleep(1)
+        self.results.extend(results)
+        return results
+
+    # ==================== DATABASE ====================
+    def scan_database(self, tld, download_all=False):
+        print(f"\n[+] Database Scan: .{tld} (Engine: {self.engine.upper()})")
+        if self.current_proxy:
+            print(f"[+] Proxy: {self.current_proxy}")
+        
+        results = []
+        queries = self.cfg.get('database_files', [])
+        
+        for i, dork in enumerate(queries, 1):
+            query = f"site:.{tld} {dork}"
+            print(f"[{i}/{len(queries)}] {dork[:50]}...")
+            urls = self.search(query, max_pages=1)
+            for url in urls:
+                status, final = self.check_status(url)
+                if status == 200:
+                    print(f"[DB] {final}")
+                    results.append({'url': final, 'type': 'database', 'status': status})
+                    if download_all:
+                        path, size = self.download_file(final)
+                        if path:
+                            print(f"  [DOWNLOADED] {path} ({size} bytes)")
+            time.sleep(1)
+        self.results.extend(results)
+        return results
+
+    # ==================== SENSITIVE ====================
+    def scan_sensitive(self, tld, download_all=False):
+        print(f"\n[+] Sensitive Files Scan: .{tld} (Engine: {self.engine.upper()})")
+        results = []
+        queries = self.cfg.get('sensitive_files', [])
+        
+        for i, dork in enumerate(queries, 1):
+            query = f"site:.{tld} {dork}"
+            print(f"[{i}/{len(queries)}] {dork[:50]}...")
+            urls = self.search(query, max_pages=1)
+            for url in urls:
+                status, final = self.check_status(url)
+                if status == 200:
+                    print(f"[SENS] {final}")
+                    results.append({'url': final, 'type': 'sensitive', 'status': status})
+                    if download_all:
+                        path, size = self.download_file(final)
+                        if path:
+                            print(f"  [DOWNLOADED] {path} ({size} bytes)")
+            time.sleep(1)
+        self.results.extend(results)
+        return results
+
+    # ==================== SQLI ====================
+    def scan_sqli(self, tld):
+        print(f"\n[+] SQLi Scan: .{tld} (Engine: {self.engine.upper()})")
+        results = []
+        queries = self.cfg.get('sqli', [])
+        
+        for i, dork in enumerate(queries, 1):
+            query = f"site:.{tld} {dork}"
+            print(f"[{i}/{len(queries)}] {dork[:50]}...")
+            urls = self.search(query, max_pages=1)
+            for url in urls:
+                test_url = url + "'"
+                try:
+                    r = self.session.get(test_url, timeout=5)
+                    if "sql" in r.text.lower() or "mysql" in r.text.lower():
+                        print(f"[SQLi] {url}")
+                        results.append({'url': url, 'type': 'sqli', 'status': 'vulnerable'})
+                except:
+                    pass
+            time.sleep(1)
+        self.results.extend(results)
+        return results
+
+    # ==================== STATUS BULK ====================
+    def check_status_bulk(self, input_file, threads=20):
+        if not os.path.exists(input_file):
+            print(f"[!] File {input_file} not found")
+            return
+        with open(input_file, 'r') as f:
+            urls = [line.strip() for line in f if line.strip()]
+        print(f"\n[+] Checking {len(urls)} URLs")
+        for url in urls:
+            status, final = self.check_status(url, timeout=5)
+            print(f"{url} -> HTTP {status if status else 'ERR'}")
+
+    # ==================== CRAWL ====================
+    def crawl_internal(self, start_url, depth=2):
+        print(f"\n[+] Crawling {start_url} (depth {depth})")
+        visited = set()
+        to_visit = [(start_url, 0)]
+        results = []
+        while to_visit:
+            url, level = to_visit.pop(0)
+            if url in visited or level > depth:
+                continue
+            visited.add(url)
+            try:
+                r = self.session.get(url, timeout=5)
+                if r.status_code == 200:
+                    soup = BeautifulSoup(r.text, 'html.parser')
+                    for link in soup.find_all('a', href=True):
+                        href = link['href']
+                        if href.startswith('/'):
+                            full = url.rstrip('/') + href
+                        elif href.startswith('http') and start_url.split('/')[2] in href:
+                            full = href
+                        else:
+                            continue
+                        if full not in visited:
+                            to_visit.append((full, level + 1))
+                            results.append(full)
+                            print(f"[CRAWL] {full}")
+            except:
+                pass
+        return results
+
+    # ==================== COMPARE ====================
+    def compare_results(self, file1, file2):
+        def load_urls(fpath):
+            with open(fpath, 'r') as f:
+                return set([line.strip().split()[-1] for line in f if line.strip()])
+        old = load_urls(file1)
+        new = load_urls(file2)
+        added = new - old
+        removed = old - new
+        print(f"\n[COMPARE] {file1} vs {file2}")
+        print(f"[+] New URLs: {len(added)}")
+        for u in added:
+            print(f"  + {u}")
+        print(f"[+] Removed URLs: {len(removed)}")
+        for u in removed:
+            print(f"  - {u}")
+
+    # ==================== SCHEDULE ====================
+    def schedule_scan(self, tld, interval_minutes=60, scan_type='data'):
+        import schedule
+        print(f"\n[+] Scheduling {scan_type} scan on .{tld} every {interval_minutes} minutes")
+
+        def job():
+            print(f"[SCHEDULER] Running scan on .{tld}")
+            if scan_type == 'data':
+                self.scan_data_pribadi(tld)
+            elif scan_type == 'database':
+                self.scan_database(tld)
+            elif scan_type == 'admin':
+                self.scan_admin_mass(tld)
+            self.export_results(f"scheduled_{tld}", 'txt')
+
+        schedule.every(interval_minutes).minutes.do(job)
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+
+    # ==================== EXPORT ====================
+    def export_results(self, prefix, format='txt'):
+        if not self.results:
+            print("[!] No results")
+            return
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        path = os.path.join(RESULTS_DIR, f"{prefix}_{timestamp}.{format}")
+        
+        with open(path, 'w') as f:
+            for r in self.results:
+                f.write(f"{r.get('url', '')}\n")
+        print(f"[+] Saved: {path}")
+
+    def show_stats(self):
+        if not self.results:
+            return
+        types = {}
+        status = {}
+        for r in self.results:
+            t = r.get('type', 'unknown')
+            types[t] = types.get(t, 0) + 1
+            s = r.get('status', 'unknown')
+            status[str(s)] = status.get(str(s), 0) + 1
+        print(f"\n[STATS] Total: {len(self.results)}")
+        for t, c in types.items():
+            print(f"  {t}: {c}")
+        for s, c in status.items():
+            print(f"  HTTP {s}: {c}")
+
+
+def main():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('-d', '--domain', help='Single target domain')
+    parser.add_argument('-m', '--tld', help='Mass target TLD (sch.id, com, go.id)')
+    parser.add_argument('-t', '--threads', type=int, default=10, help='Threads (default: 10)')
+    parser.add_argument('--data', action='store_true', help='Scan personal data (NIK, NISN, KK)')
+    parser.add_argument('--database', action='store_true', help='Scan database files')
+    parser.add_argument('--sensitive', action='store_true', help='Scan sensitive files')
+    parser.add_argument('--sqli', action='store_true', help='Scan SQL injection')
+    parser.add_argument('--admin', action='store_true', help='Scan admin login (mass)')
+    parser.add_argument('--status', action='store_true', help='Check status from file')
+    parser.add_argument('-i', '--input', help='Input file for status check')
+    parser.add_argument('--crawl', action='store_true', help='Crawl internal links')
+    parser.add_argument('--depth', type=int, default=2, help='Crawl depth (default: 2)')
+    parser.add_argument('--compare', nargs=2, metavar=('FILE1', 'FILE2'), help='Compare two result files')
+    parser.add_argument('--schedule', action='store_true', help='Schedule recurring scan')
+    parser.add_argument('--interval', type=int, default=60, help='Schedule interval in minutes')
+    parser.add_argument('--download-all', action='store_true', help='Download all found files')
+    parser.add_argument('--status-filter', type=int, help='Filter by HTTP status (200, 403)')
+    parser.add_argument('--output', choices=['txt', 'csv', 'json'], default='txt', help='Export format')
+    parser.add_argument('--wordlist', help='Custom wordlist file for paths')
+    parser.add_argument('--engine', choices=['google', 'bing', 'duckduckgo'], default='google', help='Search engine')
+    parser.add_argument('--check-proxy', action='store_true', help='Check all proxies in proxy.txt')
+    parser.add_argument('--proxy', help='Use specific proxy (http://ip:port)')
+    parser.add_argument('-h', '--help', action='store_true', help='Help')
+    parser.add_argument('-v', '--version', action='store_true', help='Version')
+
+    args = parser.parse_args()
+
+    if args.help or len(sys.argv) == 1:
+        print("""
+DORKX Ultimate Edition v7.0 - FULL VERSION
+
+USAGE:
+  # SINGLE TARGET
+  python dork -d target.com                    Scan admin login on 1 website
+  python dork -d target.com --crawl            Crawl internal links
+
+  # MASS TARGET
+  python dork -m sch.id --admin                Find all websites with admin login
+  python dork -m sch.id --data                 Scan personal data (NIK, NISN, KK)
+  python dork -m go.id --database              Scan database files
+  python dork -m com --sensitive               Scan sensitive files
+  python dork -m sch.id --sqli                 Scan SQL injection
+  python dork -m go.id --data --database       Scan data + database together
+
+  # UTILITIES
+  python dork --status -i urls.txt             Check HTTP status of URLs
+  python dork --compare old.txt new.txt        Compare two result files
+  python dork -m sch.id --schedule --interval 30  Schedule scan every 30 minutes
+
+  # PROXY
+  python dork --check-proxy                    Check all proxies
+  python dork -m sch.id --data --proxy http://ip:port  Use specific proxy
+
+  # ENGINE
+  python dork -m sch.id --data --engine bing   Use Bing engine
+  python dork -m sch.id --data --engine duckduckgo
+
+  # DOWNLOAD & EXPORT
+  python dork -m sch.id --data --download-all  Download found files
+  python dork -m sch.id --data --output json   Export as JSON
+
+EXAMPLES:
+  python dork -m go.id --data --database
+  python dork -m sch.id --data --download-all --engine bing
+  python dork --check-proxy
+  python dork -h
+""")
+        return
+
+    if args.version:
+        print(f"DORKX v{VERSION}")
+        return
+
+    dx = DorkX()
+
+    # Check proxy mode
+    if args.check_proxy:
+        working = dx.check_all_proxies()
+        print(f"\n[+] Working proxies: {len(working)}")
+        for p in working:
+            print(f"  - {p}")
+        return
+
+    # Set proxy
+    if args.proxy:
+        dx.set_proxy(args.proxy)
+        print(f"[+] Using proxy: {args.proxy}")
+    elif dx.proxies:
+        dx.get_next_proxy()
+        if dx.current_proxy:
+            print(f"[+] Using random proxy: {dx.current_proxy}")
+
+    # Set engine
+    dx.engine = args.engine
+    print(f"[+] Engine: {dx.engine.upper()}")
+
+    # Load custom wordlist
+    wordlist = None
+    if args.wordlist and os.path.exists(args.wordlist):
+        with open(args.wordlist, 'r') as f:
+            wordlist = [line.strip() for line in f]
+        print(f"[+] Loaded wordlist: {len(wordlist)} paths")
+
+    # ========== SINGLE MODE ==========
+    if args.domain and not args.tld:
+        if args.crawl:
+            results = dx.crawl_internal(args.domain, args.depth)
+            dx.results = [{'url': r, 'type': 'crawl'} for r in results]
+        else:
+            dx.scan_admin_single(args.domain, args.threads, wordlist)
+            if args.download_all:
+                for r in dx.results:
+                    path, size = dx.download_file(r['url'])
+                    if path:
+                        print(f"  [DOWNLOADED] {path} ({size} bytes)")
+        
+        dx.export_results(f"single_{args.domain}", args.output)
+        dx.show_stats()
+
+    # ========== MASS MODE ==========
+    elif args.tld:
+        if args.data:
+            dx.scan_data_pribadi(args.tld, args.download_all)
+        elif args.database:
+            dx.scan_database(args.tld, args.download_all)
+        elif args.sensitive:
+            dx.scan_sensitive(args.tld, args.download_all)
+        elif args.sqli:
+            dx.scan_sqli(args.tld)
+        elif args.admin:
+            dx.scan_admin_mass(args.tld, args.threads, args.status_filter)
+        elif args.schedule:
+            scan_type = 'data'
+            if args.database:
+                scan_type = 'database'
+            elif args.admin:
+                scan_type = 'admin'
+            dx.schedule_scan(args.tld, args.interval, scan_type)
+            return
+        else:
+            print("[!] Please specify --data, --database, --sensitive, --sqli, or --admin")
+            return
+        
+        dx.export_results(f"mass_{args.tld}", args.output)
+        dx.show_stats()
+
+    # ========== STATUS CHECK ==========
+    elif args.status:
+        if not args.input:
+            print("[!] Need -i for input file")
+            return
+        dx.check_status_bulk(args.input, args.threads)
+
+    # ========== COMPARE ==========
+    elif args.compare:
+        dx.compare_results(args.compare[0], args.compare[1])
+
+    else:
+        print("[!] Use -h for help")
+
+
+if __name__ == "__main__":
+    main()
