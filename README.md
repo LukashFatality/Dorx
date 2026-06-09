@@ -36,7 +36,6 @@ Developed by **Lukash** for security researchers and penetration testers.
 | python dork -m sch.id --database | Find database files on .sch.id |
 | python dork -m go.id --database | Find database files on .go.id |
 | python dork -m sch.id --data --database | Find data + database together |
-| python dork
 ---
 
 ---
