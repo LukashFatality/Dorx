@@ -27,24 +27,16 @@ Developed by **Lukash** for security researchers and penetration testers.
 
 ---
 
----
-## Command                                                | Function
--------------------------------------------------------|--------------------------------------------------
-python dork -h                                         | Show all help
-python dork --check-proxy                              | Check working proxies
-python dork -m go.id --data                            | Find NIK/NISN/KK data on .go.id
-python dork -m sch.id --data                           | Find student data on .sch.id
-python dork -m sch.id --database                       | Find database files on .sch.id
-python dork -m go.id --database                        | Find database files on .go.id
-python dork -m sch.id --data --database                | Find data + database together
-python dork -m com --sensitive                         | Find sensitive files on .com
-python dork -m sch.id --sqli                           | Find SQL injection on .sch.id
-python dork -m sch.id --admin                          | Find admin login on .sch.id
-python dork -d target.com                              | Find admin login on 1 website
-python dork -d target.com --crawl                      | Crawl all website links
-python dork --status -i urls.txt                       | Check HTTP status from file
-python dork --compare a.txt b.txt                      | Compare 2 result files
-python dork -m sch.id --schedule --interval 30         | Auto scan every 30 minutes
+| Command | Function |
+|---------|----------|
+| python dork -h | Show all help |
+| python dork --check-proxy | Check working proxies |
+| python dork -m go.id --data | Find NIK/NISN/KK data on .go.id |
+| python dork -m sch.id --data | Find student data on .sch.id |
+| python dork -m sch.id --database | Find database files on .sch.id |
+| python dork -m go.id --database | Find database files on .go.id |
+| python dork -m sch.id --data --database | Find data + database together |
+| python dork
 ---
 
 ---
