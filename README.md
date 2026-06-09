@@ -1,4 +1,4 @@
-# 🔍 DORKX - Advanced Dorking Tool for Termux
+# Tool DorkX 
 
 **DORKX** is a powerful, professional dorking tool designed for Termux (Android) and Linux systems. It automates Google, Bing, and DuckDuckGo dorking to find exposed sensitive information, admin panels, personal data (NIK, NISN, KK), database files, and much more.
 
@@ -39,9 +39,10 @@ Developed by **Lukash** for security researchers and penetration testers.
 ---
 
 ---
-# Disclaimer 
-jdhdh
+# Disclaimer
+please add active proxy in proxy.txt file
 ---
+
 
 
 ## 📦 Installation
